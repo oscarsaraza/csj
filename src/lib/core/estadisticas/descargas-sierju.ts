@@ -1,7 +1,7 @@
+import { PLAYWRIGHT_ENDPOINT, SIERJU_PASSWORD, SIERJU_URL, SIERJU_USERNAME } from '$env/static/private';
+import { uploadReadableStream } from '$lib/server/files';
 import _ from 'lodash';
 import playwright, { type Page } from 'playwright';
-
-import { SIERJU_PASSWORD, SIERJU_URL, SIERJU_USERNAME, PLAYWRIGHT_ENDPOINT } from '$env/static/private';
 
 // Configuración de backoff exponencial para reintentos.
 const BASE = 1.5;
@@ -105,7 +105,10 @@ async function descargarDatosDespachoSierju(page: playwright.Page, periodo: numb
 			// Descargar archivo xls
 			const [download] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), enlaceDescarga.click()]);
 
-			await download.saveAs(`./static/${codigoDespacho}/${fila.periodoReportado}.xls`);
+			const fileStream = await download.createReadStream();
+			await uploadReadableStream(`${fila.periodoReportado}.xls`, fileStream.read());
+
+			// await download.saveAs(`./static/${codigoDespacho}/${fila.periodoReportado}.xls`);
 			console.log('Descargado:', `${fila.periodoReportado}.xls`);
 		}
 

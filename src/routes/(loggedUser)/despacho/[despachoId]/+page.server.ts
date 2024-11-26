@@ -37,7 +37,11 @@ export const actions = {
 		const despacho = await db.despacho.findFirst({ where: { id: params.despachoId }, select: { codigo: true } });
 		if (!despacho) error(404, 'Despacho no encontrado');
 
-		descargarDatosSierju(2023, [despacho.codigo]);
+		try {
+			descargarDatosSierju(2023, [despacho.codigo]);
+		} catch (err) {
+			error(500, 'Error al descargar la información estadística desde SIERJU.');
+		}
 
 		redirect(302, '/despacho/' + params.despachoId);
 	},
