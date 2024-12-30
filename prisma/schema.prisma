@@ -110,18 +110,19 @@ model CapacidadMaximaRespuesta {
 }
 
 model Despacho {
-  id                    String                 @id @default(auto()) @map("_id") @db.ObjectId
-  codigo                String
-  nombre                String
-  numero                Int?
-  tipoDespachoId        String?                @db.ObjectId
-  tipoDespacho          TipoDespacho?          @relation(fields: [tipoDespachoId], references: [id])
-  municipio             String?
-  distrito              String?
-  registrosCalificacion RegistroCalificacion[]
-  registrosAudiencias   RegistroAudiencias[]
-  calificaciones        CalificacionDespacho[]
-  novedadesFuncionarios NovedadFuncionario[]
+  id                        String                      @id @default(auto()) @map("_id") @db.ObjectId
+  codigo                    String
+  nombre                    String
+  numero                    Int?
+  tipoDespachoId            String?                     @db.ObjectId
+  tipoDespacho              TipoDespacho?               @relation(fields: [tipoDespachoId], references: [id])
+  municipio                 String?
+  distrito                  String?
+  registrosCalificacion     RegistroCalificacion[]
+  registrosAudiencias       RegistroAudiencias[]
+  calificaciones            CalificacionDespacho[]
+  novedadesFuncionarios     NovedadFuncionario[]
+  PeriodoEstadisticasSierju PeriodoEstadisticasSierju[]
 }
 
 model Funcionario {
@@ -171,6 +172,17 @@ model RegistroAudiencias {
   calificacion            CalificacionDespacho[]
 
   @@unique([despachoId, funcionarioId, periodo])
+}
+
+model PeriodoEstadisticasSierju {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  createdAt  DateTime @default(now()) @db.Date
+  despachoId String   @db.ObjectId
+  despacho   Despacho @relation(fields: [despachoId], references: [id])
+  periodo    Int
+  // Identificador del archivo con estadísticas y capturas de pantalla del proceso de descarga desde Sierju.
+  zipFileKey String   @unique
+  filename   String
 }
 
 model RegistroCalificacion {

@@ -1,13 +1,15 @@
-import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { randomUUID } from 'crypto';
 import {
 	CLOUDFLARE_ACCOUNT_ID,
 	CLOUDFLARE_R2_ACCESS_KEY_ID,
-	CLOUDFLARE_R2_SECRET_ACCESS_KEY,
 	CLOUDFLARE_R2_BUCKET_NAME,
+	CLOUDFLARE_R2_SECRET_ACCESS_KEY,
 } from '$env/static/private';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { randomUUID } from 'crypto';
+import mime from 'mime';
+import type { Readable } from 'stream';
 
 const s3Client = new S3Client({
 	region: 'ENAM',
@@ -57,7 +59,7 @@ export async function getFileSignedUrl(fileKey: string): Promise<string> {
 	return signedUrl;
 }
 
-export async function uploadReadableStream(filename: string, stream: ReadableStream): Promise<string> {
+export async function uploadReadableStream(filename: string, stream: Readable): Promise<string> {
 	const fileKey = randomUUID();
 
 	const upload = new Upload({
@@ -65,16 +67,15 @@ export async function uploadReadableStream(filename: string, stream: ReadableStr
 		params: {
 			Bucket: CLOUDFLARE_R2_BUCKET_NAME,
 			Key: fileKey,
-			// ContentType: file.mimetype,
-			// ACL: 'public-read',
-			Tagging: `filename=${filename}&createdAt=${Date.now()}`,
 			Body: stream,
+			ContentType: mime.getType(filename) || 'application/octet-stream',
 		},
 	});
+
 	const response = await upload.done();
 
-	console.log('{ uploadWriteStreamResponse: response }');
-	console.log({ uploadWriteStreamResponse: response });
+	if (response.$metadata.httpStatusCode !== 200 || !response.Key)
+		throw new Error(`Error al guardar el archivo descargado. Código de error: ${response.$metadata.httpStatusCode}`);
 
-	return 'fileKey';
+	return response.Key;
 }

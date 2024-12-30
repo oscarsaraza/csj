@@ -1,7 +1,10 @@
 import { PLAYWRIGHT_ENDPOINT, SIERJU_PASSWORD, SIERJU_URL, SIERJU_USERNAME } from '$env/static/private';
+import { db } from '$lib/server/db-client';
 import { uploadReadableStream } from '$lib/server/files';
 import _ from 'lodash';
 import playwright, { type Page } from 'playwright';
+import archiver from 'archiver';
+import { PassThrough } from 'stream';
 
 // Configuración de backoff exponencial para reintentos.
 const BASE = 1.5;
@@ -32,7 +35,7 @@ function wait(ms: number) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function descargarDatosDespachoSierju(page: playwright.Page, periodo: number, codigoDespacho: string) {
+async function descargarDatosDespachoSierju(page: playwright.Page, periodo: number, codigoDespacho: string, despachoId: string) {
 	await iniciarSesion(page);
 	await irAPaginaDescarga(page);
 
@@ -53,8 +56,11 @@ async function descargarDatosDespachoSierju(page: playwright.Page, periodo: numb
 		return true;
 	}
 
+	const zip = archiver('zip', { zlib: { level: 9 } });
+
 	// Captura de pantalla del listado de reportes del despacho en el periodo
-	await page.screenshot({ path: `./static/${codigoDespacho}/imgs/listado.png` });
+	// await page.screenshot({ path: `./static/${codigoDespacho}/imgs/listado.png` });
+	zip.append(await page.screenshot(), { name: `listado.png` });
 
 	const columnas = [
 		'despacho',
@@ -91,7 +97,8 @@ async function descargarDatosDespachoSierju(page: playwright.Page, periodo: numb
 		.sortBy('periodoReportado')
 		.value();
 
-	console.table(datosFilasParaExportar);
+	console.log('Despacho: ', datosFilasParaExportar[0].despacho);
+	console.table(datosFilasParaExportar, ['funcionario', 'periodoReportado', 'nombre', 'estado']);
 
 	// Ir a la página de detalle de cada uno de los reportes y descargar el archivo xls
 	for await (const fila of datosFilasParaExportar) {
@@ -104,41 +111,48 @@ async function descargarDatosDespachoSierju(page: playwright.Page, periodo: numb
 		if (enlaceDescarga) {
 			// Descargar archivo xls
 			const [download] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), enlaceDescarga.click()]);
-
+			const filename = `${fila.periodoReportado}.xls`;
 			const fileStream = await download.createReadStream();
-			await uploadReadableStream(`${fila.periodoReportado}.xls`, fileStream.read());
-
-			// await download.saveAs(`./static/${codigoDespacho}/${fila.periodoReportado}.xls`);
-			console.log('Descargado:', `${fila.periodoReportado}.xls`);
+			zip.append(fileStream, { name: filename });
 		}
 
 		// Guardar la captura de pantalla de la página de detalle del reporte descargado.
-		await page.screenshot({
-			path: `./static/${codigoDespacho}/imgs/${fila.periodoReportado}.png`,
-		});
+		zip.append(await page.screenshot(), { name: `${fila.periodoReportado}.png` });
+		console.log('Descargado:', `${fila.periodoReportado}.xls`);
 
 		await page.getByText('Reporte Actividad Diligenciamiento').click();
 		await page.waitForResponse((resp) => resp.status() === 200);
 	}
+
+	await zip.finalize();
+
+	const passThrough = new PassThrough();
+	zip.pipe(passThrough);
+	const key = await uploadReadableStream(`${codigoDespacho}-${periodo}.zip`, passThrough);
+
+	await db.periodoEstadisticasSierju.create({
+		data: { despachoId, periodo, zipFileKey: key, filename: `${codigoDespacho}-${periodo}.zip` },
+	});
 
 	console.log(`Descarga de ${codigoDespacho} completa.\n`);
 	return true;
 }
 
 export async function descargarDatosSierju(periodo: number, codigosDespacho: string[] = []) {
-	const browser = await playwright.chromium.connect(PLAYWRIGHT_ENDPOINT, { slowMo: 50 });
+	const browser = await playwright.chromium.launch({ slowMo: 50, headless: true });
 	const context = await browser.newContext({ viewport: { width: 1920, height: 1200 } });
 	const page = await context.newPage();
 
 	for await (const codigoDespacho of codigosDespacho) {
 		let resultado = false;
 		let intentos = 0;
+		const despacho = await db.despacho.findFirstOrThrow({ where: { codigo: codigoDespacho } });
 
 		do {
 			try {
 				if (intentos === 0) console.log(`Descargando ${codigoDespacho} ...`);
 				else console.log(`Reintento ${intentos} ...`);
-				resultado = await descargarDatosDespachoSierju(page, periodo, codigoDespacho);
+				resultado = await descargarDatosDespachoSierju(page, periodo, codigoDespacho, despacho.id);
 			} catch (error) {
 				console.log(error);
 				// Ignorar errores y reintentar ...
