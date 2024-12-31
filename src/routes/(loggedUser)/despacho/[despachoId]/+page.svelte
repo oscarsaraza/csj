@@ -1,6 +1,7 @@
 <script lang="ts">
 	import PageLayout from '$lib/components/custom/page-layout.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import * as Card from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
@@ -8,6 +9,8 @@
 
 	export let data: PageData;
 	const { despacho, opcionesTipoDespacho } = data;
+
+	const periodoActual = new Date().getFullYear();
 </script>
 
 <PageLayout username={data.user}>
@@ -44,8 +47,17 @@
 			</div>
 		</form>
 
-		<form method="post" action="?/descargarEstadisticas">
-			<Button type="submit">Descargar estadísticas SIERJU</Button>
-		</form>
+		<Card.Root class="max-w-xs">
+			<Card.Header>
+				<Card.Title>Descarga de estadísticas SIERJU</Card.Title>
+			</Card.Header>
+			<Card.Content>
+				<form method="post" action="?/descargarEstadisticas" class="space-y-2">
+					<Label for="distrito">Periodo</Label>
+					<Input type="number" name="periodo" id="periodo" min="2000" max={periodoActual} value={periodoActual - 1} required />
+					<Button type="submit">Iniciar descarga</Button>
+				</form>
+			</Card.Content>
+		</Card.Root>
 	</div>
 </PageLayout>

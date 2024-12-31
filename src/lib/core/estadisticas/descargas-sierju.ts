@@ -53,13 +53,12 @@ async function descargarDatosDespachoSierju(page: playwright.Page, periodo: numb
 	const textoSinResultados = await page.getByText('No hay Resultados para mostrar').isVisible();
 	if (textoSinResultados) {
 		console.error(`Codigo de despacho no encontrado: ${codigoDespacho}`);
-		return true;
+		return '';
 	}
 
 	const zip = archiver('zip', { zlib: { level: 9 } });
 
 	// Captura de pantalla del listado de reportes del despacho en el periodo
-	// await page.screenshot({ path: `./static/${codigoDespacho}/imgs/listado.png` });
 	zip.append(await page.screenshot(), { name: `listado.png` });
 
 	const columnas = [
@@ -124,18 +123,17 @@ async function descargarDatosDespachoSierju(page: playwright.Page, periodo: numb
 		await page.waitForResponse((resp) => resp.status() === 200);
 	}
 
+	console.log(`Creando archivo ${codigoDespacho}-${periodo}.zip ...`);
 	await zip.finalize();
 
 	const passThrough = new PassThrough();
+	console.log(`Cargando archivo ${codigoDespacho}-${periodo}.zip ...`);
 	zip.pipe(passThrough);
-	const key = await uploadReadableStream(`${codigoDespacho}-${periodo}.zip`, passThrough);
-
-	await db.periodoEstadisticasSierju.create({
-		data: { despachoId, periodo, zipFileKey: key, filename: `${codigoDespacho}-${periodo}.zip` },
-	});
+	const zipFileKey = await uploadReadableStream(`${codigoDespacho}-${periodo}.zip`, passThrough);
+	console.log('Archivo cargado');
 
 	console.log(`Descarga de ${codigoDespacho} completa.\n`);
-	return true;
+	return zipFileKey;
 }
 
 export async function descargarDatosSierju(periodo: number, codigosDespacho: string[] = []) {
@@ -144,27 +142,33 @@ export async function descargarDatosSierju(periodo: number, codigosDespacho: str
 	const page = await context.newPage();
 
 	for await (const codigoDespacho of codigosDespacho) {
-		let resultado = false;
+		let zipFileKey = '';
 		let intentos = 0;
 		const despacho = await db.despacho.findFirstOrThrow({ where: { codigo: codigoDespacho } });
 
+		const { id } = await db.periodoEstadisticasSierju.create({
+			data: { despachoId: despacho.id, periodo, zipFileKey: '', filename: `${codigoDespacho}-${periodo}.zip` },
+		});
+
 		do {
 			try {
-				if (intentos === 0) console.log(`Descargando ${codigoDespacho} ...`);
-				else console.log(`Reintento ${intentos} ...`);
-				resultado = await descargarDatosDespachoSierju(page, periodo, codigoDespacho, despacho.id);
+				console.log(intentos === 0 ? `Descargando ${codigoDespacho} ...` : `Reintento ${intentos} ...`);
+				zipFileKey = await descargarDatosDespachoSierju(page, periodo, codigoDespacho, despacho.id);
 			} catch (error) {
 				console.log(error);
 				// Ignorar errores y reintentar ...
 			}
 
-			if (!resultado) {
+			if (!zipFileKey) {
 				intentos++;
 				const tiempoReintento = Math.round(BASE * MULTIPLICADOR ** intentos);
 				console.error(`Error en la descarga del despacho ${codigoDespacho}. Reintento ${intentos} en ${tiempoReintento} segundos`);
 				await wait(tiempoReintento * 1000);
 			}
-		} while (!resultado && intentos <= MAX_REINTENTOS);
+		} while (!zipFileKey && intentos <= MAX_REINTENTOS);
+
+		if (zipFileKey) await db.periodoEstadisticasSierju.update({ where: { id }, data: { zipFileKey, finishedAt: new Date() } });
+		else await db.periodoEstadisticasSierju.delete({ where: { id } });
 	}
 
 	await context.clearCookies();
